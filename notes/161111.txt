@@ -1,0 +1,102 @@
+- there's a problem with Myria to hack around:
+    - Command to specify instance type:
+        myria-cluster create --instance-type m4.large test544
+    - replaces the default one:
+        myria-cluster create test-cluster --region us-west-2
+        - from http://myria.cs.washington.edu/docs/myria-ec2.html
+- notes from first connection:
+    - took about 5 minutes for stuff to start
+        Not all instances reachable, waiting 60 seconds...
+    - then the terminal went wild wich things like
+        RUNNING HANDLER [ganglia-monitor : restart ganglia-monitor] ********************
+        changed: [35.162.223.148] => {"changed": true, "name": "ganglia-monitor", "state": "started"}
+        changed: [35.163.51.140] => {"changed": true, "name": "ganglia-monitor", "state": "started"}
+    - that kept going for 5-10 min
+    - more status dump:
+        PLAY RECAP *********************************************************************
+        35.161.143.27              : ok=50   changed=48   unreachable=0    failed=0
+        35.162.161.50              : ok=32   changed=30   unreachable=0    failed=0
+        35.162.223.148             : ok=32   changed=30   unreachable=0    failed=0
+        35.163.102.74              : ok=32   changed=30   unreachable=0    failed=0
+        35.163.51.140              : ok=32   changed=30   unreachable=0    failed=0
+    - went back to 
+        Waiting for Myria service to become available...
+        Myria service unavailable, waiting 60 seconds...
+        Myria service unavailable, waiting 60 seconds...
+        Myria service unavailable, waiting 60 seconds...
+    - now at the AWS console, I see 1 m4.large instance, and 10 EBS volumes:
+        https://us-west-2.console.aws.amazon.com/ec2/v2/home?region=us-west-2#Volumes:sort=desc:createTime
+    - finally, some green text printed with info like the myria website suggested:
+        Your new Myria cluster 'test544' has been launched on Amazon EC2 in the 'us-west-2' region.
+
+        View the Myria worker IDs and public hostnames of all nodes in this cluster (the coordinator has worker ID 0):
+        myria-cluster list test544 --region us-west-2
+        Stop this cluster:
+        myria-cluster stop test544 --region us-west-2
+
+        Start this cluster after stopping it:
+        myria-cluster start test544 --region us-west-2
+
+        Destroy this cluster:
+        myria-cluster destroy test544 --region us-west-2
+
+        Log into the coordinator node:
+        ssh -i /Users/janet/.ssh/janet-myria_us-west-2.pem ubuntu@ec2-35-161-143-27.us-west-2.compute.amazonaws.com
+
+        MyriaWeb interface:
+        http://ec2-35-161-143-27.us-west-2.compute.amazonaws.com:8080
+
+        MyriaX REST endpoint:
+        http://ec2-35-161-143-27.us-west-2.compute.amazonaws.com:8753
+
+        Ganglia web interface:
+        http://ec2-35-161-143-27.us-west-2.compute.amazonaws.com:8090
+
+        Jupyter notebook interface:
+        http://ec2-35-161-143-27.us-west-2.compute.amazonaws.com:8888
+
+        Do you want to open the MyriaWeb interface in your browser? [y/N]: y
+- I let it open the web page, and this came up:
+    http://ec2-35-161-143-27.us-west-2.compute.amazonaws.com:8080/editor
+    - It is a Myria-styled website. 
+- Look at the head of the twitter dataset:
+    - command:
+        r = SCAN(TwitterK);
+        s = SELECT * from r LIMIT 5;
+        store(s, twitter_head);
+    - result I downloaded:
+        (myria) badger:AWS_myria janet$ cat /Users/janet/Downloads/public-adhoc-twitter_head.csv
+        a,b
+        21,299
+        56,12
+        64,15
+        240,299
+        291,949
+- Load the datasets:
+    - HW lists these:
+        https://s3-us-west-2.amazonaws.com/cse544data/S0001.csv 
+        https://s3-us-west-2.amazonaws.com/cse544data/S0002.csv 
+    - modify the Twitter data loading query:
+        S = load("https://s3-us-west-2.amazonaws.com/cse544data/S0001.csv",
+        csv(schema(id:string, seq:string),skip=0));
+        store(S, S1, [id, seq]);
+
+        S = load("https://s3-us-west-2.amazonaws.com/cse544data/S0002.csv",
+        csv(schema(id:string, seq:string),skip=0));
+        store(S, S2, [id, seq]);
+    - I thought that failed, but it just took a while to complete.
+    
+- Aside:
+    - now my AWS console doesn't show that I have any instances or AMIs running.
+        - did Myria take them? 
+    - they did show up when I clicked somewhere else (?)
+- look at head of a dataset:
+    (myria) badger:AWS_myria janet$ cat /Users/janet/Downloads/public-adhoc-s1_head.csv
+    id,seq
+    NS500496_31_H3MH3BGXX:1:11101:6696:1068#TAAGGCGCGATC/1_joint,CATATATATAATCATTACATGCAACACCACCCATTGGTACAACACCGTTTGTTGTAGCTTTAGCCATTGTCATAATATCTGGAGTTACTCCAAATTCATCTGCACCAAATTTAGAACCTGTTCTGCCCCATCCTGTAATTACTTCATCAAAAATTAAAAGTATTCCGTGTTTGTCACAGATCTCTCTTAGTT
+    NS500496_31_H3MH3BGXX:1:11101:6675:1079#TAAGGCGCGATC/1_joint,GCTTTGGTCGTTGTCTGGAATTTGGTTTTCGTTGAACGGATCTGATCAATCAAGTGACGGAGTTGCACTGAGGAGTTCACGGACCTGTGACGTCCAGCTCAGCGGCATGCCCCCGTTTTTGATGACACAGTCGGCAAGTTCAGTTTTGCGATCCATAGGCCATTGGGCGCTGATGCGTTGCTCGGCCTCCTCAGGAGAGAGCCGATTACGCGTCATTAGTCGCTGTCTTTGCTGGGTTGGCGAGCAGTGCACCACCCAGACCTCCGAGCAAAGAC
+    NS500496_31_H3MH3BGXX:1:11101:26390:1087#TAAGGCGCGATC/1_joint,GGCGCTGGCGGTGAAGGATTTGGTGCGGTTGAATTGGTACAAGAATAAAGACGGCGAGTACGAGTGCCCGGTGCTGAATATGACGTTTACGGACGCGACGCGGATATGCGCGGTGAAGACGACTGGAAACGTGTATTGCACCGATG
+    NS500496_31_H3MH3BGXX:1:11101:15674:1094#TAAGGCGCGATC/1_joint,CAGAGGTGGTTGCTGCCCCGTCCAGGCCTTCAAGCGTCCACTTGATGCCGACGTCGGCCATAGTCAGCCAGCGCGCCTCGCTCAAGTCGACCTCGGCAGCGTACTCGGCGCCGATCGAGGCAGGGTCCGGCACACTGACGTGAACATTGGTCGGCGGGCCCAGCCACGTGACGGGGATGC
+    NS500496_31_H3MH3BGXX:1:11101:4639:1104#TAAGGCGCGATC/1_joint,AGCCTGACATCATCGAACCGATAAGGGTTCACCTTCGTTCCTTGGTGCCCTTTGTAATTCTCCGTCGGCGACAGCAAAGTATATCCATAAGCATTCACCAAAATACTCACCGGCTCTCTTCGACCATAGGTTCGGAAAGCCTGGTTTTTCTTTCCACCGGGAAG
+
+  

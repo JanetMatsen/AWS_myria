@@ -1,0 +1,165 @@
+=== Loading relations ===
+S = load("https://s3-us-west-2.amazonaws.com/cse544data/S0002.csv",
+csv(schema(id:string, seq:string),skip=1));
+store(S, S2, [id, seq]);
+
+S = load("https://s3-us-west-2.amazonaws.com/cse544data/S0001.csv",
+csv(schema(id:string, seq:string),skip=1));
+store(S, S1, [id, seq]);
+
+
+=== Make toy datasets ===
+r = SCAN(S1);
+s = SELECT * from r LIMIT 1000;
+store(s, S1_1000);
+
+r = SCAN(S2);
+s = SELECT * from r LIMIT 1000;
+store(s, S2_1000);
+
+=== get 11-mers ===
+T = SCAN(S1_1000);
+s = select ngram(seq, 11) as kmer from T;
+store(s, S1_1000_11mer);
+
+T = SCAN(S2_1000);
+s = select ngram(seq, 11) as kmer from T;
+store(s, S1_2000_11mer);
+
+=== toy kmer count ===
+T1 = scan(S1_1000_11mer);
+Agg = [from T1 emit 'S0002' AS sampleid, kmer AS kmer, count(kmer) AS cnt];
+store(Agg, S1_1000_11mer_aggregate);
+
+T1 = scan(S2_1000_11mer);
+Agg = [from T1 emit 'S0002' AS sampleid, kmer AS kmer, count(kmer) AS cnt];
+store(Agg, S1_2000_11mer_aggregate);
+
+=== Do them all for one table ===
+T = SCAN(S1_1000);
+s = select ngram(seq, 11) as kmer from T;
+Agg1 = [from s emit 'S0002' AS sampleid, kmer AS kmer, count(kmer) AS cnt];
+store(Agg1, result_1000_11mer);
+
+=== Do them all for both tables at once ===
+T1 = SCAN(S1_1000);
+T2 = SCAN(S2_1000);
+s1 = select ngram(seq, 11) as kmer from T1;
+s2 = select ngram(seq, 11) as kmer from T2;
+Agg1 = [from s1 emit 'S0001' AS sampleid, kmer AS kmer, count(kmer) AS cnt];
+Agg2 = [from s2 emit 'S0002' AS sampleid, kmer AS kmer, count(kmer) AS cnt];
+result = Agg1 + Agg2;
+store(result, result_1000_11mer);
+
+=== Normalize ===
+T = SCAN(result_1000_11mer);
+sample_sums = [from T EMIT sampleid, sum(cnt) AS sample_sum];
+joined = [FROM T, sample_sums
+            WHERE T.sampleid = sample_sums.sampleid
+            EMIT *];
+store(joined, result_1000_11mer_norm);
+
+T = SCAN(result_1000_11mer);
+sample_sums = [from T EMIT sampleid, sum(cnt) AS sample_sum];
+joined = [FROM T, sample_sums
+            WHERE T.sampleid = sample_sums.sampleid
+            EMIT T.sampleid, T.kmer, T.cnt/sample_sums.sample_sum AS frac];
+store(joined, result_1000_11mer_norm);
+
+=== check normalization ===
+- check that each sample's frac sums to 1:
+T = scan(result_1000_11mer_norm);
+sums = [FROM T EMIT sampleid, sum(frac)];
+store(sums, check_sums);
+
+=== pairwise Bray-Curtis distance ===
+- http://www.nature.com/ismej/journal/v4/n10/pdf/ismej201051a.pdf
+- first pivot the
+
+T = scan(result_1000_11mer_norm);
+joined = [FROM T as T2, T as T1
+            WHERE T2.kmer = T1.kmer
+              AND T2.sampleid='S0001'
+            EMIT kmer, T1.frac as frac1, T2.frac as frac2];
+store(joined, brayc);
+
+
+- now take min
+- Min doesn't take arguments.
+- but we can define a function!
+
+T = scan(result_1000_11mer_norm);
+
+joined = [FROM T as T2, T as T1
+            WHERE T2.kmer = T1.kmer
+              AND T1.sampleid='S0001' AND T2.sampleid='S0002'
+            EMIT kmer, T1.frac as frac1, T2.frac as frac2];
+store(joined, brayc);
+
+
+def get_min(v1, v2):
+    case when v1 <= v2 then v1
+        else v2 end;
+T = scan(result_1000_11mer_norm);
+joined = [FROM T as T2, T as T1
+            WHERE T2.kmer = T1.kmer
+              AND T1.sampleid='S0001' AND T2.sampleid='S0002'
+            EMIT kmer, T1.frac as frac1, T2.frac as frac2,
+                get_min(frac1, frac2) as min_frac];
+store(joined, brayc);
+
+
+def get_min(v1, v2):
+    case when v1 <= v2 then v1
+        else v2 end;
+T = scan(result_1000_11mer_norm);
+joined = [FROM T as T2, T as T1
+            WHERE T2.kmer = T1.kmer
+              AND T1.sampleid='S0001' AND T2.sampleid='S0002'
+            EMIT get_min(frac1, frac2) as min_frac];
+store(joined, brayc);
+
+-- 1 - sum(min_frac) is the answer.
+
+def get_min(v1, v2):
+    case when v1 <= v2 then v1
+        else v2 end;
+T = scan(result_1000_11mer_norm);
+min_frac = [FROM T as T2, T as T1
+            WHERE T2.kmer = T1.kmer
+              AND T1.sampleid='S0001' AND T2.sampleid='S0002'
+            EMIT get_min(T1.frac, T2.frac) as min_frac];
+bcd = [FROM min_frac
+       EMIT 1 - sum(min_frac) AS Bray_Curtis_dissimilarity];
+store(bcd, bcd_score);
+
+
+
+
+
+
+
+
+
+
+
+=== get kmers out and group/sum in the same call ===
+T = SCAN(S1_1000);
+s = select ngram(seq, 11) as kmer from T;
+Agg = [from T1.kmer AS kmer, T1 emit count(kmer)  AS cnt ];
+store(s, S1_1000_11mer);
+
+
+
+
+
+
+T = SCAN(S1_1000);
+s = select ngram(seq, 11) as kmer from T;
+store(s, S1_1000_11mer);
+
+
+=== Count kmers ====
+T = SCAN(S1_1000);
+s = select ngram(seq, 11) as kmer from T;
+store(s, S1_1000_11mer);
